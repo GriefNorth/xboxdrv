@@ -1,0 +1,423 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 0000000..0f86f32
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,166 @@
++# Xbox360 USB Gamepad Userspace Driver
++# Copyright (C) 2015 Ingo Ruhnke <grumbel@gmail.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++cmake_minimum_required(VERSION 3.0)
++project(xboxdrv)
++
++option(BUILD_TESTS "Build tests" OFF)
++option(WARNINGS "Switch on extra warnings" OFF)
++option(WERROR "Turn warnings into errors" OFF)
++
++include(GNUInstallDirs)
++
++add_compile_options(-std=c++11)
++
++if(WARNINGS)
++  set(WARNINGS_CXX_FLAGS ${WARNINGS_CXX_FLAGS}
++    -pedantic -Wall -Wextra -Wno-c++0x-compat -Wnon-virtual-dtor -Weffc++
++    -Wshadow -Wcast-qual -Winit-self -Wno-unused-parameter
++    -Wconversion -Wno-sign-conversion)
++  # -Winline -Wfloat-equal -Wunreachable-code
++endif()
++
++if(WERROR)
++  set(WARNINGS_CXX_FLAGS ${WARNINGS_CXX_FLAGS}
++    -Werror)
++endif()
++
++set(XBOXDRV_BINDIR "${CMAKE_INSTALL_PREFIX}/bin" CACHE PATH "Install location for executables")
++set(XBOXDRV_MANDIR "${CMAKE_INSTALL_PREFIX}/share/man" CACHE PATH "Install location for datafiles")
++
++find_package(Threads REQUIRED)
++find_package(X11)
++find_package(GTK2 COMPONENTS gtk)
++
++find_package(PkgConfig)
++find_package(Python REQUIRED)
++pkg_search_module(USB REQUIRED libusb-1.0)
++pkg_search_module(UDEV REQUIRED libudev)
++pkg_search_module(DBUSGLIB REQUIRED dbus-glib-1)
++pkg_search_module(CWIID OPTIONAL cwiid)
++# FIXME: define -DHAVE_CWIID when found
++
++include_directories(src/)
++include_directories(${CMAKE_CURRENT_BINARY_DIR}/src/)
++
++file(GLOB XBOXDRV_SOURCES_CXX RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
++  src/*.cpp
++  src/axisevent/*.cpp
++  src/axisfilter/*.cpp
++  src/buttonevent/*.cpp
++  src/buttonfilter/*.cpp
++  src/controller/*.cpp
++  src/modifier/*.cpp
++  src/symbols/*.cpp)
++
++set(XBOXDRV_SOURCES_CXX
++  ${XBOXDRV_SOURCES_CXX}
++  ${CMAKE_CURRENT_BINARY_DIR}/src/xboxdrv_controller_glue.hpp
++  ${CMAKE_CURRENT_BINARY_DIR}/src/xboxdrv_daemon_glue.hpp
++  ${CMAKE_CURRENT_BINARY_DIR}/src/xboxdrv_vfs.hpp)
++
++file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/src)
++
++set(DBUS_GLUE ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/dbus_glue.py)
++set(BIN2H ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bin2h.py)
++
++set(TARGET ${CMAKE_CURRENT_BINARY_DIR}/src/xboxdrv_vfs.hpp)
++set(SOURCES
++  ${CMAKE_CURRENT_SOURCE_DIR}/examples/mouse.xboxdrv
++  ${CMAKE_CURRENT_SOURCE_DIR}/examples/xpad-wireless.xboxdrv)
++add_custom_command(
++  OUTPUT ${TARGET}
++  DEPENDS ${SOURCES}
++  COMMAND ${BIN2H} --output ${TARGET} --prefix ${CMAKE_CURRENT_SOURCE_DIR} --namespace=xboxdrv_vfs ${SOURCES})
++
++set(TARGET ${CMAKE_CURRENT_BINARY_DIR}/src/xboxdrv_controller_glue.hpp)
++set(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/xboxdrv_controller.xml)
++add_custom_command(
++  OUTPUT ${TARGET}
++  DEPENDS ${SOURCE}
++  COMMAND ${DBUS_GLUE} -o ${TARGET} ${SOURCE} --dbus-prefix=xboxdrv_controller)
++
++set(TARGET ${CMAKE_CURRENT_BINARY_DIR}/src/xboxdrv_daemon_glue.hpp)
++set(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/xboxdrv_daemon.xml)
++add_custom_command(
++  OUTPUT ${TARGET}
++  DEPENDS ${SOURCE}
++  COMMAND ${DBUS_GLUE} -o ${TARGET} ${SOURCE} --dbus-prefix=xboxdrv_daemon)
++
++add_library(libxboxdrv STATIC ${XBOXDRV_SOURCES_CXX})
++set_target_properties(libxboxdrv PROPERTIES OUTPUT_NAME xboxdrv)
++
++file(STRINGS VERSION XBOXDRV_VERSION)
++target_compile_definitions(libxboxdrv PUBLIC -DPACKAGE_VERSION="${XBOXDRV_VERSION}")
++target_compile_options(libxboxdrv PRIVATE ${WARNINGS_CXX_FLAGS})
++
++target_include_directories(libxboxdrv SYSTEM PUBLIC
++  ${DBUSGLIB_INCLUDE_DIRS}
++  ${GLIB_INCLUDE_DIRS}
++  ${GTHREAD_INCLUDE_DIRS}
++  ${USB_INCLUDE_DIRS}
++  ${UDEV_INCLUDE_DIRS}
++  ${X11_INCLUDE_DIR})
++
++target_link_libraries(libxboxdrv PUBLIC
++  ${DBUSGLIB_LIBRARIES}
++  ${GLIB_LIBRARIES}
++  ${GTHREAD_LIBRARIES}
++  ${USB_LIBRARIES}
++  ${UDEV_LIBRARIES}
++  ${X11_LIBRARIES})
++
++add_executable(xboxdrv src/main/main.cpp)
++target_link_libraries(xboxdrv libxboxdrv)
++
++if(BUILD_TESTS)
++  include_directories(SYSTEM external/googletest/googletest/include/)
++
++  # build gtest
++  add_library(gtest STATIC ${CMAKE_CURRENT_SOURCE_DIR}/external/googletest/googletest/src/gtest-all.cc)
++  target_include_directories(gtest SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/googletest/googletest/)
++
++  # build gtest_main
++  add_library(gtest_main STATIC ${CMAKE_CURRENT_SOURCE_DIR}/external/googletest/googletest/src/gtest_main.cc)
++
++  # build automatic tests
++  file(GLOB XBOXDRV_TEST_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
++    test/*_gtest.cpp)
++  add_executable(test_xboxdrv ${XBOXDRV_TEST_SOURCES})
++  target_compile_options(test_xboxdrv PRIVATE ${WARNINGS_CXX_FLAGS})
++  target_link_libraries(test_xboxdrv gtest gtest_main libxboxdrv ${CMAKE_THREAD_LIBS_INIT})
++
++  # build old manual tests
++  file(GLOB TEST_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
++    test/*_test.cpp)
++  foreach(SOURCE ${TEST_SOURCES})
++    get_filename_component(SOURCE_BASENAME ${SOURCE} NAME_WE)
++    add_executable(${SOURCE_BASENAME} ${SOURCE})
++    target_link_libraries(${SOURCE_BASENAME} libxboxdrv)
++  endforeach(SOURCE)
++endif()
++
++install(
++  TARGETS xboxdrv
++  RUNTIME DESTINATION ${XBOXDRV_BINDIR})
++install(
++  PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/xboxdrvctl
++  DESTINATION ${XBOXDRV_BINDIR})
++install(
++  FILES doc/xboxdrv.1 doc/xboxdrv.1 doc/xboxdrv-daemon.1
++  DESTINATION ${XBOXDRV_MANDIR}/man1)
++
++# EOF #
+diff --git a/bin2h.py b/bin2h.py
+new file mode 100755
+index 0000000..682ba7b
+--- /dev/null
++++ b/bin2h.py
+@@ -0,0 +1,93 @@
++#!/usr/bin/env python3
++
++# Xbox360 USB Gamepad Userspace Driver
++# Copyright (C) 2015 Ingo Ruhnke <grumbel@gmail.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++
++import sys
++import argparse
++import string
++import os.path
++
++
++def build_bin2h(target, sources, prefixpath, namespace):
++    """
++    Takes a list of files and converts them into a C source that can be included
++    """
++    def c_escape(str):
++        return str.translate(str.maketrans("/.-", "___"))
++
++    with open(target, "w") as fout:
++        fout.write("// autogenerated by scons Bin2H builder, do not edit by hand!\n\n")
++
++        if namespace:
++            fout.write("namespace %s {\n\n" % namespace)
++
++        # write down data
++        for src in sources:
++            if prefixpath is None:
++                src_c_name = c_escape(src)
++            else:
++                src_c_name = c_escape(os.path.relpath(src, prefixpath))
++
++            with open(src, "rb") as fin:
++                data = fin.read()
++                fout.write("// \"%s\"\n" % src)
++                fout.write("const char %s[] = {" % src_c_name)
++                bytes_arr = ["0x%02x" % c for c in data]
++                for i in range(len(bytes_arr)):
++                    if i % 13 == 0:
++                        fout.write("\n  ")
++                    fout.write(bytes_arr[i])
++                    if i != len(bytes_arr)-1:
++                        fout.write(", ")
++                fout.write("\n};\n\n")
++
++        # write down file table
++        if False:
++            fout.write("const char** file_table = {\n")
++            fout.write(",\n".join(["  %-35s %-s" % ("\"%s\"," % src,
++                                                     c_escape(src))
++                                    for src in sources]))
++            fout.write("\n}\n\n")
++
++        if namespace:
++            fout.write("} // namespace %s\n\n" % namespace)
++
++        fout.write("/* EOF */\n")
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Convert binary file to .h")
++    parser.add_argument('SOURCE', action='store', nargs='+', type=str,
++                        help="SOURCE file")
++    parser.add_argument('-o', '--output', metavar='TARGET', action='store', required=True, type=str,
++                        help="TARGET file")
++    parser.add_argument('-p', '--prefix', metavar='PREFIX', action='store', required=False, type=str,
++                        help="PREFIX is removed from the path before converting it to a C variable name")
++    parser.add_argument('--namespace', metavar='NAMESPACE', action='store', type=str,
++                        help="Wrap code into NAMESPACE")
++
++    args = parser.parse_args()
++
++    build_bin2h(args.output, args.SOURCE, args.prefix, args.namespace)
++
++
++if __name__ == "__main__":
++    main()
++
++
++# EOF #
+diff --git a/dbus_glue.py b/dbus_glue.py
+new file mode 100755
+index 0000000..93a8ea6
+--- /dev/null
++++ b/dbus_glue.py
+@@ -0,0 +1,61 @@
++#!/usr/bin/env python3
++
++# Xbox360 USB Gamepad Userspace Driver
++# Copyright (C) 2015 Ingo Ruhnke <grumbel@gmail.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++
++import sys
++import argparse
++import subprocess
++import re
++
++
++def build_dbus_glue(target, source, dbus_prefix):
++    """
++    C++ doesn't allow casting from void* to a function pointer,
++    thus we have to change the code to use a union to do the
++    conversion.
++    """
++    xml = subprocess.Popen(["dbus-binding-tool",
++                            "--mode=glib-server",
++                            "--prefix=" + dbus_prefix, source],
++                           stdout=subprocess.PIPE).communicate()[0]
++    xml = xml.decode()
++    xml = re.sub(r"callback = \(([A-Za-z_]+)\) \(marshal_data \? marshal_data : cc->callback\);",
++                 r"union { \1 fn; void* obj; } conv;\n  "
++                 "conv.obj = (marshal_data ? marshal_data : cc->callback);\n  "
++                 "callback = conv.fn;", xml)
++
++    with open(target, "w") as f:
++        f.write(xml)
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Generate dbus glue")
++    parser.add_argument('SOURCE', action='store', nargs=1, type=str, help="SOURCE file")
++    parser.add_argument('-o', '--output', metavar='TARGET', action='store', required=True, type=str, help="TARGET file")
++    parser.add_argument('--dbus-prefix', metavar='PREFIX', action='store', required=True, type=str, help="Use DBus Prefix")
++
++    args = parser.parse_args()
++
++    build_dbus_glue(args.output, args.SOURCE[0], args.dbus_prefix)
++
++
++if __name__ == "__main__":
++    main()
++
++
++# EOF #
+diff --git a/doc/Makefile b/doc/Makefile
+index 83b1c1b..96d925c 100644
+--- a/doc/Makefile
++++ b/doc/Makefile
+@@ -1,11 +1,11 @@
+ all: xboxdrv.1
+ 
+-xboxdrv.1: xboxdrv.xml Makefile
++%.1: %.xml Makefile
+ 	echo "<!ENTITY xboxdrv_version \"$$(cat ../VERSION)\">" > xboxdrv.ent
+ 	db2x_xsltproc --stylesheet man "$<" | db2x_manxml
+ 	xmlto xhtml -o xboxdrv.html -m config.xsl xboxdrv.xml
+ 	mv -v xboxdrv.html/index.html xboxdrv.html/index.orig.html
+-	tidy -utf8 -indent -wrap 1000 -o xboxdrv.html/index.html xboxdrv.html/index.orig.html
++	tidy -q -utf8 -indent -wrap 1000  -o xboxdrv.html/index.html xboxdrv.html/index.orig.html
+ #	docbook2x-texi --output-dir "../build/doc/" "$<"
+ #        MANWIDTH=80 man -l xboxdrv.1
+ 
+diff --git a/guix.scm b/guix.scm
+index facfc37..df34618 100644
+--- a/guix.scm
++++ b/guix.scm
+@@ -18,7 +18,7 @@
+   (cons* "/ipfs/QmetP3eCAM9q3VPCj9BvjFdWkTA7voycebnXjyfc2zacFE/guix-cocfree_v0.0.0-45-g0fe3c86"
+          %load-path))
+ 
+-(use-modules (guix build-system scons)
++(use-modules (guix build-system cmake)
+              ((guix licenses) #:prefix license:)
+              (guix packages)
+              (guix utils)
+@@ -39,7 +39,7 @@
+    (name "xboxdrv")
+    (version (version-from-source %source-dir))
+    (source (source-from-source %source-dir))
+-   (build-system scons-build-system)
++   (build-system cmake-build-system)
+    (arguments
+     `(#:phases
+       (modify-phases
+@@ -55,19 +55,19 @@
+                                                   "/site-packages")
+                                    (search-path-as-string->list
+                                     (or (getenv "PYTHONPATH") "")))))
+-            (invoke "make" "install"
+-                    (string-append "PREFIX=" out))
+             (wrap-program (string-append out "/bin/xboxdrvctl")
+                           `("PYTHONPATH" ":" prefix ,pythonpath))))))))
+    (native-inputs
+     `(("pkg-config" ,pkg-config)
+-      ("glib" ,glib "bin")))
++      ("glib:bin" ,glib "bin")))
+    (inputs
+     `(("boost" ,boost)
+       ("dbus-glib" ,dbus-glib)
+       ("libusb" ,libusb)
+       ("libudev" ,eudev)
++      ("bluez" ,bluez)
+       ("libx11" ,libx11)
++      ("glib" ,glib)
+       ("python" ,python)
+       ("python-dbus" ,python-dbus)))
+    (synopsis "Xbox360 USB Gamepad Userspace Driver")
+@@ -77,7 +77,7 @@ driver and has support for Xbox1 gamepads, Xbox360 USB gamepads and
+ Xbox360 wireless gamepads. The Xbox360 guitar and some Xbox1 dancemats
+ might work too. The Xbox 360 racing wheel is not supported, but
+ shouldn't be to hard to add if somebody is interested.")
+-   (home-page "http://gitlab.com/grumbel/xboxdrv")
++   (home-page "https://gitlab.com/xboxdrv/xboxdrv/")
+    (license license:gpl3+)))
+ 
+ xboxdrv
+diff --git a/src/controller_slot.cpp b/src/controller_slot.cpp
+index dae249d..05912df 100644
+--- a/src/controller_slot.cpp
++++ b/src/controller_slot.cpp
+@@ -69,7 +69,7 @@ ControllerSlot::disconnect()
+ bool
+ ControllerSlot::is_connected() const
+ {
+-  return m_thread;
++  return m_thread != nullptr;
+ }
+ 
+ /* EOF */
