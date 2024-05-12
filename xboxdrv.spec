@@ -3,7 +3,7 @@
 
 Name: xboxdrv
 Version: 0.8.8
-Release: 14.git%{shortcommit}%{?dist}
+Release: 1.git%{shortcommit}%{?dist}
 Summary: Userspace Xbox/Xbox360 Gamepad Driver for Linux
 
 License: GPLv3+
