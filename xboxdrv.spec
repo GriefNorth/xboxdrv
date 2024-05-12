@@ -49,10 +49,9 @@ both first and third party.
 %global debug_package %{nil}
 
 %prep
-%setup -q -n %{name}
+%autosetup -p1
 
-%patch0 -p0
-%patch1 -p1
+%pre
 
 %build
 mkdir build
