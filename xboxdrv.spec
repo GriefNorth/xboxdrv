@@ -1,4 +1,4 @@
-%global commit 944de6aeee2fc93081cb6be70e954b390cbae065
+%global commit 89481a6896d2717eded53f258ea6ddeb0f863a44
 %global shortcommit %(c=%{commit}; echo ${c:0:7})
 
 Name: xboxdrv
